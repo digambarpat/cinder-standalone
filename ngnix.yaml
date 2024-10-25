@@ -5,7 +5,17 @@ metadata:
   labels:
     env: test
 spec:
+  volumes:
+    - name: task-pv-storage
+      persistentVolumeClaim:
+        claimName: hellopvc
   containers:
   - name: nginx
     image: nginx
     imagePullPolicy: IfNotPresent
+    ports:
+      - containerPort: 80
+        name: "http-server"
+    volumeMounts:
+    - name: task-pv-storage
+      mountPath: "/usr/share/nginx.html"
