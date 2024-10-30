@@ -11,17 +11,14 @@ import (
 )
 
 func main() {
-	provider, err := noauth.NewClient(gophercloud.AuthOptions{
-		Username:   os.Getenv("OS_USERNAME"),
-		TenantName: os.Getenv("OS_TENANT_NAME"),
-	})
+	provider, err := noauth.NewClient(gophercloud.AuthOptions{})
 
 	if err != nil {
 		fmt.Println("Error getting client ", err)
 	}
 
 	client, err := noauth.NewBlockStorageNoAuthV3(provider, noauth.EndpointOpts{
-		CinderEndpoint: os.Getenv("CINDER_ENDPOINT"),
+		CinderEndpoint: os.Getenv("10.96.56.166:8776/v3"),
 	})
 
 	if err != nil {
@@ -32,23 +29,24 @@ func main() {
 
 	schedulerHintOpts := volumes.SchedulerHintOpts{
 		DifferentHost: []string{
-			"volume-a-uuid",
+			"volume-test",
 		},
 	}
 
 	createOpts := volumes.CreateOpts{
-		Name: "volume_b",
-		Size: 10,
+		Name: "volume-test",
+		Size: 1,
 	}
 
 	volume, err := volumes.Create(context.TODO(), client, createOpts, schedulerHintOpts).Extract()
 	if err != nil {
 		panic(err)
 	}
+	fmt.Println("Volume with name created successfully ", volume.Name)
 
 	connectOpts := &volumes.InitializeConnectionOpts{
-		IP:        "127.0.0.1",
-		Host:      "stack",
+		IP:        "172.19.0.4",
+		Host:      "cinder-test",
 		Initiator: "iqn.1994-05.com.redhat:17cf566367d2",
 		Multipath: gophercloud.Enabled,
 		Platform:  "x86_64",
