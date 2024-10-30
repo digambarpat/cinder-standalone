@@ -10,11 +10,6 @@ RUN pip install -e .
 RUN pip install python-brick-cinderclient-ext  
 
 WORKDIR .
-RUN wget https://go.dev/dl/go1.23.2.linux-amd64.tar.gz
-RUN tar -C /usr/local -xzf go1.23.2.linux-amd64.tar.gz
-RUN export PATH=$PATH:/usr/local/go/bin
-
-WORKDIR .
 COPY requirements.txt .
  
 RUN pip install -r requirements.txt
