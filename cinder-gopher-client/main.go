@@ -29,7 +29,7 @@ func main() {
 		CinderEndpoint: os.Getenv("CINDER_ENDPOINT"),
 	})
 
-	fmt.Println("Endpoint", client.Endpoint)
+	fmt.Println("Endpoint ", client.Endpoint)
 	endpoint := strings.Split(client.Endpoint, "default")[0]
 	client.Endpoint = endpoint
 
@@ -39,28 +39,29 @@ func main() {
 
 	fmt.Println("Cinder noath client ", client)
 
-	gv := volumes.Get(context.TODO(), client, "cf8befd6-950a-49eb-869d-faf0d4ba1475")
+	volumeID := "da929da9-ce7d-4edf-862e-5d4fe34eefd7"
+	gv := volumes.Get(context.TODO(), client, volumeID)
 	fmt.Println("volumes details ", gv)
 
-	opts := volumes.ListOpts{
-		Name: "test-vol",
-	}
-	var i volumes.ListOptsBuilder = opts
-	i.ToVolumeListQuery()
-	vols := volumes.List(client, i)
-	fmt.Println("List of volumes ", vols)
+	// opts := volumes.ListOpts{
+	//      Name: test-vol,
+	// }
+	// var i volumes.ListOptsBuilder = opts
+	// i.ToVolumeListQuery()
+	// vols := volumes.List(client, i)
+	// fmt.Println(List of volumes , vols)
 
 	//schedulerHintOpts := volumes.SchedulerHintOpts{
-	//      LocalToInstance: "",
+	//      LocalToInstance: ,
 	//}
 	//var scd volumes.SchedulerHintOptsBuilder = schedulerHintOpts
 	//createOpts := volumes.CreateOpts{
-	//      Name: "volume-test",
+	//      Name: volume-test,
 	//      Size: 1,
 	//}
 	//var co volumes.CreateOptsBuilder = createOpts
 	//volume := volumes.Create(context.TODO(), client, co, scd)
-	//fmt.Println("Volume with name created successfully ", volume)
+	//fmt.Println(Volume with name created successfully , volume)
 
 	connectOpts := &volumes.InitializeConnectionOpts{
 		IP:        "172.19.0.4",
@@ -72,7 +73,7 @@ func main() {
 	}
 	var inConn volumes.InitializeConnectionOptsBuilder = connectOpts
 	inConn.ToVolumeInitializeConnectionMap()
-	connectionInfo := volumes.InitializeConnection(context.TODO(), client, "cf8befd6-950a-49eb-869d-faf0d4ba1475", inConn)
+	connectionInfo := volumes.InitializeConnection(context.TODO(), client, volumeID, inConn)
 
-	fmt.Printf("%+v\n", connectionInfo)
+	fmt.Printf("%+v\n ", connectionInfo)
 }

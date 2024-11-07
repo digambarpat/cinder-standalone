@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-lvm-pod
+spec:
+  containers:
+    - name: nginx
+      image: nginx
+      volumeDevices:
+        - devicePath: /dev/block
+          name: lvm-vol
+  volumes:
+    - name: lvm-vol
+      persistentVolumeClaim:
+        claimName: iscsi-pvc

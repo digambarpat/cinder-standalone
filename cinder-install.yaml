@@ -1,785 +1,793 @@
 ---
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: cinder-conf
-  namespace: default
-data:
-  script.sql: |
-    CREATE DATABASE cinder;
-    GRANT ALL PRIVILEGES ON cinder.* TO 'cinder'@'localhost' \
-        IDENTIFIED BY 'password';
-    GRANT ALL PRIVILEGES ON cinder.* TO 'cinder'@'%' \
-        IDENTIFIED BY 'password';
-  api-paste.ini: |
-    #############
-    # OpenStack #
-    #############
-
-    [composite:osapi_volume]
-    use = call:cinder.api:root_app_factory
-    /: apiversions
-    /v1: openstack_volume_api_v1
-    /v2: openstack_volume_api_v2
-    /v3: openstack_volume_api_v3
-
-    [composite:openstack_volume_api_v1]
-    use = call:cinder.api.middleware.auth:pipeline_factory
-    noauth = cors http_proxy_to_wsgi request_id faultwrap sizelimit osprofiler noauth apiv1
-    keystone = cors http_proxy_to_wsgi request_id faultwrap sizelimit osprofiler authtoken keystonecontext apiv1
-    keystone_nolimit = cors http_proxy_to_wsgi request_id faultwrap sizelimit osprofiler authtoken keystonecontext apiv1
-
-    [composite:openstack_volume_api_v2]
-    use = call:cinder.api.middleware.auth:pipeline_factory
-    noauth = cors http_proxy_to_wsgi request_id faultwrap sizelimit osprofiler noauth apiv2
-    keystone = cors http_proxy_to_wsgi request_id faultwrap sizelimit osprofiler authtoken keystonecontext apiv2
-    keystone_nolimit = cors http_proxy_to_wsgi request_id faultwrap sizelimit osprofiler authtoken keystonecontext apiv2
-
-    [composite:openstack_volume_api_v3]
-    use = call:cinder.api.middleware.auth:pipeline_factory
-    noauth = cors http_proxy_to_wsgi request_id faultwrap sizelimit osprofiler noauth apiv3
-    keystone = cors http_proxy_to_wsgi request_id faultwrap sizelimit osprofiler authtoken keystonecontext apiv3
-    keystone_nolimit = cors http_proxy_to_wsgi request_id faultwrap sizelimit osprofiler authtoken keystonecontext apiv3
-
-    [filter:request_id]
-    paste.filter_factory = oslo_middleware.request_id:RequestId.factory
-
-    [filter:http_proxy_to_wsgi]
-    paste.filter_factory = oslo_middleware.http_proxy_to_wsgi:HTTPProxyToWSGI.factory
-
-    [filter:cors]
-    paste.filter_factory = oslo_middleware.cors:filter_factory
-    oslo_config_project = cinder
-
-    [filter:faultwrap]
-    paste.filter_factory = cinder.api.middleware.fault:FaultWrapper.factory
-
-    [filter:osprofiler]
-    paste.filter_factory = osprofiler.web:WsgiMiddleware.factory
-
-    [filter:noauth]
-    paste.filter_factory = cinder.api.middleware.auth:NoAuthMiddleware.factory
-
-    [filter:sizelimit]
-    paste.filter_factory = oslo_middleware.sizelimit:RequestBodySizeLimiter.factory
-
-    [app:apiv1]
-    paste.app_factory = cinder.api.v1.router:APIRouter.factory
-
-    [app:apiv2]
-    paste.app_factory = cinder.api.v2.router:APIRouter.factory
-
-    [app:apiv3]
-    paste.app_factory = cinder.api.v3.router:APIRouter.factory
-
-    [pipeline:apiversions]
-    pipeline = cors http_proxy_to_wsgi faultwrap osvolumeversionapp
-
-    [app:osvolumeversionapp]
-    paste.app_factory = cinder.api.versions:Versions.factory
-
-    ##########
-    # Shared #
-    ##########
-
-    [filter:keystonecontext]
-    paste.filter_factory = cinder.api.middleware.auth:CinderKeystoneContext.factory
-
-    [filter:authtoken]
-    paste.filter_factory = keystonemiddleware.auth_token:filter_factory
-  cinder_sudoers: |
-    # This sudoers file supports rootwrap for both Kolla and LOCI Images.
-    Defaults !requiretty
-    Defaults secure_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin:/var/lib/openstack/bin:/var/lib/kolla/venv/bin"
-    cinder ALL = (root) NOPASSWD: /var/lib/kolla/venv/bin/cinder-rootwrap /etc/cinder/rootwrap.conf *, /var/lib/openstack/bin/cinder-rootwrap /etc/cinder/rootwrap.conf *
-  rootwrap: |
-    # Configuration for cinder-rootwrap
-    # This file should be owned by (and only-writeable by) the root user
-
-    [DEFAULT]
-    # List of directories to load filter definitions from (separated by ',').
-    # These directories MUST all be only writeable by root !
-    filters_path=/etc/cinder/rootwrap.d
-
-    # List of directories to search executables in, in case filters do not
-    # explicitely specify a full path (separated by ',')
-    # If not specified, defaults to system PATH environment variable.
-    # These directories MUST all be only writeable by root !
-    exec_dirs=/sbin,/usr/sbin,/bin,/usr/bin,/usr/local/bin,/usr/local/sbin,/var/lib/openstack/bin,/var/lib/kolla/venv/bin
-
-    # Enable logging to syslog
-    # Default value is False
-    use_syslog=False
-
-    # Which syslog facility to use.
-    # Valid values include auth, authpriv, syslog, local0, local1...
-    # Default value is 'syslog'
-    syslog_log_facility=syslog
-
-    # Which messages to log.
-    # INFO means log all usage
-    # ERROR means only log unsuccessful attempts
-    syslog_log_level=ERROR
-  rootwrap_filters: |
-    # cinder-rootwrap command filters for volume nodes
-    # This file should be owned by (and only-writeable by) the root user
-
-    [Filters]
-    # cinder/volume/iscsi.py: iscsi_helper '--op' ...
-    ietadm: CommandFilter, ietadm, root
-    tgtadm: CommandFilter, tgtadm, root
-    iscsictl: CommandFilter, iscsictl, root
-    tgt-admin: CommandFilter, tgt-admin, root
-    cinder-rtstool: CommandFilter, cinder-rtstool, root
-    scstadmin: CommandFilter, scstadmin, root
-
-    # LVM related show commands
-    pvs: EnvFilter, env, root, LC_ALL=C, pvs
-    vgs: EnvFilter, env, root, LC_ALL=C, vgs
-    lvs: EnvFilter, env, root, LC_ALL=C, lvs
-    lvdisplay: EnvFilter, env, root, LC_ALL=C, lvdisplay
-
-    # -LVM related show commands with suppress fd warnings
-    pvs_fdwarn: EnvFilter, env, root, LC_ALL=C, LVM_SUPPRESS_FD_WARNINGS=, pvs
-    vgs_fdwarn: EnvFilter, env, root, LC_ALL=C, LVM_SUPPRESS_FD_WARNINGS=, vgs
-    lvs_fdwarn: EnvFilter, env, root, LC_ALL=C, LVM_SUPPRESS_FD_WARNINGS=, lvs
-    lvdisplay_fdwarn: EnvFilter, env, root, LC_ALL=C, LVM_SUPPRESS_FD_WARNINGS=, lvdisplay
-
-
-    # -LVM related show commands conf var
-    pvs_lvmconf: EnvFilter, env, root, LVM_SYSTEM_DIR=, LC_ALL=C, pvs
-    vgs_lvmconf: EnvFilter, env, root, LVM_SYSTEM_DIR=, LC_ALL=C, vgs
-    lvs_lvmconf: EnvFilter, env, root, LVM_SYSTEM_DIR=, LC_ALL=C, lvs
-    lvdisplay_lvmconf: EnvFilter, env, root, LVM_SYSTEM_DIR=, LC_ALL=C, lvdisplay
-
-    # -LVM conf var with suppress fd_warnings
-    pvs_lvmconf: EnvFilter, env, root, LVM_SYSTEM_DIR=, LC_ALL=C, LVM_SUPPRESS_FD_WARNINGS=, pvs
-    vgs_lvmconf: EnvFilter, env, root, LVM_SYSTEM_DIR=, LC_ALL=C, LVM_SUPPRESS_FD_WARNINGS=, vgs
-    lvs_lvmconf: EnvFilter, env, root, LVM_SYSTEM_DIR=, LC_ALL=C, LVM_SUPPRESS_FD_WARNINGS=, lvs
-    lvdisplay_lvmconf: EnvFilter, env, root, LVM_SYSTEM_DIR=, LC_ALL=C, LVM_SUPPRESS_FD_WARNINGS=, lvdisplay
-
-    # os-brick library commands
-    # os_brick.privileged.run_as_root oslo.privsep context
-    # This line ties the superuser privs with the config files, context name,
-    # and (implicitly) the actual python code invoked.
-    privsep-rootwrap: RegExpFilter, privsep-helper, root, privsep-helper, --config-file, /etc/(?!\.\.).*, --privsep_context, os_brick.privileged.default, --privsep_sock_path, /tmp/.*
-    # The following and any cinder/brick/* entries should all be obsoleted
-    # by privsep, and may be removed once the os-brick version requirement
-    # is updated appropriately.
-    scsi_id: CommandFilter, /lib/udev/scsi_id, root
-    drbdadm: CommandFilter, drbdadm, root
-
-    # cinder/brick/local_dev/lvm.py: 'vgcreate', vg_name, pv_list
-    vgcreate: CommandFilter, vgcreate, root
-
-    # cinder/brick/local_dev/lvm.py: 'lvcreate', '-L', sizestr, '-n', volume_name,..
-    # cinder/brick/local_dev/lvm.py: 'lvcreate', '-L', ...
-    lvcreate: EnvFilter, env, root, LC_ALL=C, lvcreate
-    lvcreate_lvmconf: EnvFilter, env, root, LVM_SYSTEM_DIR=, LC_ALL=C, lvcreate
-    lvcreate_fdwarn: EnvFilter, env, root, LC_ALL=C, LVM_SUPPRESS_FD_WARNINGS=, lvcreate
-    lvcreate_lvmconf_fdwarn: EnvFilter, env, root, LVM_SYSTEM_DIR=, LVM_SUPPRESS_FD_WARNINGS=, LC_ALL=C, lvcreate
-
-    # cinder/volume/driver.py: 'dd', 'if=%s' % srcstr, 'of=%s' % deststr,...
-    dd: CommandFilter, dd, root
-
-    # cinder/volume/driver.py: 'lvremove', '-f', %s/%s % ...
-    lvremove: CommandFilter, lvremove, root
-
-    # cinder/volume/driver.py: 'lvrename', '%(vg)s', '%(orig)s' '(new)s'...
-    lvrename: CommandFilter, lvrename, root
-
-    # cinder/brick/local_dev/lvm.py: 'lvextend', '-L' '%(new_size)s', '%(lv_name)s' ...
-    # cinder/brick/local_dev/lvm.py: 'lvextend', '-L' '%(new_size)s', '%(thin_pool)s' ...
-    lvextend: EnvFilter, env, root, LC_ALL=C, lvextend
-    lvextend_lvmconf: EnvFilter, env, root, LVM_SYSTEM_DIR=, LC_ALL=C, lvextend
-    lvextend_fdwarn: EnvFilter, env, root, LC_ALL=C, LVM_SUPPRESS_FD_WARNINGS=, lvextend
-    lvextend_lvmconf_fdwarn: EnvFilter, env, root, LVM_SYSTEM_DIR=, LC_ALL=C, LVM_SUPPRESS_FD_WARNINGS=, lvextend
-
-    # cinder/brick/local_dev/lvm.py: 'lvchange -a y -K <lv>'
-    lvchange: CommandFilter, lvchange, root
-
-    # cinder/brick/local_dev/lvm.py: 'lvconvert', '--merge', snapshot_name
-    lvconvert: CommandFilter, lvconvert, root
-
-    # cinder/volume/driver.py: 'iscsiadm', '-m', 'discovery', '-t',...
-    # cinder/volume/driver.py: 'iscsiadm', '-m', 'node', '-T', ...
-    iscsiadm: CommandFilter, iscsiadm, root
-
-    # cinder/volume/utils.py: utils.temporary_chown(path, 0)
-    chown: CommandFilter, chown, root
-
-    # cinder/volume/utils.py: copy_volume(..., ionice='...')
-    ionice_1: ChainingRegExpFilter, ionice, root, ionice, -c[0-3], -n[0-7]
-    ionice_2: ChainingRegExpFilter, ionice, root, ionice, -c[0-3]
-
-    # cinder/volume/utils.py: setup_blkio_cgroup()
-    cgcreate: CommandFilter, cgcreate, root
-    cgset: CommandFilter, cgset, root
-    cgexec: ChainingRegExpFilter, cgexec, root, cgexec, -g, blkio:\S+
-
-    # cinder/volume/driver.py
-    dmsetup: CommandFilter, dmsetup, root
-    ln: CommandFilter, ln, root
-
-    # cinder/image/image_utils.py
-    qemu-img: EnvFilter, env, root, LC_ALL=C, qemu-img
-    qemu-img_convert: CommandFilter, qemu-img, root
-
-    udevadm: CommandFilter, udevadm, root
-
-    # cinder/volume/driver.py: utils.read_file_as_root()
-    cat: CommandFilter, cat, root
-
-    # cinder/volume/nfs.py
-    stat: CommandFilter, stat, root
-    mount: CommandFilter, mount, root
-    df: CommandFilter, df, root
-    du: CommandFilter, du, root
-    truncate: CommandFilter, truncate, root
-    chmod: CommandFilter, chmod, root
-    rm: CommandFilter, rm, root
-
-    # cinder/volume/drivers/remotefs.py
-    mkdir: CommandFilter, mkdir, root
-
-    # cinder/volume/drivers/netapp/nfs.py:
-    netapp_nfs_find: RegExpFilter, find, root, find, ^[/]*([^/\0]+(/+)?)*$, -maxdepth, \d+, -name, img-cache.*, -amin, \+\d+
-
-    # cinder/volume/drivers/glusterfs.py
-    chgrp: CommandFilter, chgrp, root
-    umount: CommandFilter, umount, root
-    fallocate: CommandFilter, fallocate, root
-
-    # cinder/volumes/drivers/hds/hds.py:
-    hus-cmd: CommandFilter, hus-cmd, root
-    hus-cmd_local: CommandFilter, /usr/local/bin/hus-cmd, root
-
-    # cinder/volumes/drivers/hds/hnas_backend.py
-    ssc: CommandFilter, ssc, root
-
-    # cinder/brick/initiator/connector.py:
-    ls: CommandFilter, ls, root
-    tee: CommandFilter, tee, root
-    multipath: CommandFilter, multipath, root
-    multipathd: CommandFilter, multipathd, root
-    systool: CommandFilter, systool, root
-
-    # cinder/volume/drivers/block_device.py
-    blockdev: CommandFilter, blockdev, root
-
-    # cinder/volume/drivers/ibm/gpfs.py
-    # cinder/volume/drivers/tintri.py
-    mv: CommandFilter, mv, root
-
-    # cinder/volume/drivers/ibm/gpfs.py
-    cp: CommandFilter, cp, root
-    mmgetstate: CommandFilter, /usr/lpp/mmfs/bin/mmgetstate, root
-    mmclone: CommandFilter, /usr/lpp/mmfs/bin/mmclone, root
-    mmlsattr: CommandFilter, /usr/lpp/mmfs/bin/mmlsattr, root
-    mmchattr: CommandFilter, /usr/lpp/mmfs/bin/mmchattr, root
-    mmlsconfig: CommandFilter, /usr/lpp/mmfs/bin/mmlsconfig, root
-    mmlsfs: CommandFilter, /usr/lpp/mmfs/bin/mmlsfs, root
-    mmlspool: CommandFilter, /usr/lpp/mmfs/bin/mmlspool, root
-    mkfs: CommandFilter, mkfs, root
-    mmcrfileset: CommandFilter, /usr/lpp/mmfs/bin/mmcrfileset, root
-    mmlinkfileset: CommandFilter, /usr/lpp/mmfs/bin/mmlinkfileset, root
-    mmunlinkfileset: CommandFilter, /usr/lpp/mmfs/bin/mmunlinkfileset, root
-    mmdelfileset: CommandFilter, /usr/lpp/mmfs/bin/mmdelfileset, root
-    mmcrsnapshot: CommandFilter, /usr/lpp/mmfs/bin/mmcrsnapshot, root
-    mmdelsnapshot: CommandFilter, /usr/lpp/mmfs/bin/mmdelsnapshot, root
-
-    # cinder/volume/drivers/ibm/gpfs.py
-    # cinder/volume/drivers/ibm/ibmnas.py
-    find_maxdepth_inum: RegExpFilter, find, root, find, ^[/]*([^/\0]+(/+)?)*$, -maxdepth, \d+, -ignore_readdir_race, -inum, \d+, -print0, -quit
-
-    # cinder/brick/initiator/connector.py:
-    aoe-revalidate: CommandFilter, aoe-revalidate, root
-    aoe-discover: CommandFilter, aoe-discover, root
-    aoe-flush: CommandFilter, aoe-flush, root
-
-    # cinder/brick/initiator/linuxscsi.py:
-    sg_scan: CommandFilter, sg_scan, root
-
-    #cinder/backup/services/tsm.py
-    dsmc:CommandFilter,/usr/bin/dsmc,root
-
-    # cinder/volume/drivers/hitachi/hbsd_horcm.py
-    raidqry: CommandFilter, raidqry, root
-    raidcom: CommandFilter, raidcom, root
-    pairsplit: CommandFilter, pairsplit, root
-    paircreate: CommandFilter, paircreate, root
-    pairdisplay: CommandFilter, pairdisplay, root
-    pairevtwait: CommandFilter, pairevtwait, root
-    horcmstart.sh: CommandFilter, horcmstart.sh, root
-    horcmshutdown.sh: CommandFilter, horcmshutdown.sh, root
-    horcmgr: EnvFilter, env, root, HORCMINST=, /etc/horcmgr
-
-    # cinder/volume/drivers/hitachi/hbsd_snm2.py
-    auman: EnvFilter, env, root, LANG=, STONAVM_HOME=, LD_LIBRARY_PATH=, STONAVM_RSP_PASS=, STONAVM_ACT=, /usr/stonavm/auman
-    auluref: EnvFilter, env, root, LANG=, STONAVM_HOME=, LD_LIBRARY_PATH=, STONAVM_RSP_PASS=, STONAVM_ACT=, /usr/stonavm/auluref
-    auhgdef: EnvFilter, env, root, LANG=, STONAVM_HOME=, LD_LIBRARY_PATH=, STONAVM_RSP_PASS=, STONAVM_ACT=, /usr/stonavm/auhgdef
-    aufibre1: EnvFilter, env, root, LANG=, STONAVM_HOME=, LD_LIBRARY_PATH=, STONAVM_RSP_PASS=, STONAVM_ACT=, /usr/stonavm/aufibre1
-    auhgwwn: EnvFilter, env, root, LANG=, STONAVM_HOME=, LD_LIBRARY_PATH=, STONAVM_RSP_PASS=, STONAVM_ACT=, /usr/stonavm/auhgwwn
-    auhgmap: EnvFilter, env, root, LANG=, STONAVM_HOME=, LD_LIBRARY_PATH=, STONAVM_RSP_PASS=, STONAVM_ACT=, /usr/stonavm/auhgmap
-    autargetmap: EnvFilter, env, root, LANG=, STONAVM_HOME=, LD_LIBRARY_PATH=, STONAVM_RSP_PASS=, STONAVM_ACT=, /usr/stonavm/autargetmap
-    aureplicationvvol: EnvFilter, env, root, LANG=, STONAVM_HOME=, LD_LIBRARY_PATH=, STONAVM_RSP_PASS=, STONAVM_ACT=, /usr/stonavm/aureplicationvvol
-    auluadd: EnvFilter, env, root, LANG=, STONAVM_HOME=, LD_LIBRARY_PATH=, STONAVM_RSP_PASS=, STONAVM_ACT=, /usr/stonavm/auluadd
-    auludel: EnvFilter, env, root, LANG=, STONAVM_HOME=, LD_LIBRARY_PATH=, STONAVM_RSP_PASS=, STONAVM_ACT=, /usr/stonavm/auludel
-    auluchgsize: EnvFilter, env, root, LANG=, STONAVM_HOME=, LD_LIBRARY_PATH=, STONAVM_RSP_PASS=, STONAVM_ACT=, /usr/stonavm/auluchgsize
-    auchapuser: EnvFilter, env, root, LANG=, STONAVM_HOME=, LD_LIBRARY_PATH=, STONAVM_RSP_PASS=, STONAVM_ACT=, /usr/stonavm/auchapuser
-    autargetdef: EnvFilter, env, root, LANG=, STONAVM_HOME=, LD_LIBRARY_PATH=, STONAVM_RSP_PASS=, STONAVM_ACT=, /usr/stonavm/autargetdef
-    autargetopt: EnvFilter, env, root, LANG=, STONAVM_HOME=, LD_LIBRARY_PATH=, STONAVM_RSP_PASS=, STONAVM_ACT=, /usr/stonavm/autargetopt
-    autargetini: EnvFilter, env, root, LANG=, STONAVM_HOME=, LD_LIBRARY_PATH=, STONAVM_RSP_PASS=, STONAVM_ACT=, /usr/stonavm/autargetini
-    auiscsi: EnvFilter, env, root, LANG=, STONAVM_HOME=, LD_LIBRARY_PATH=, STONAVM_RSP_PASS=, STONAVM_ACT=, /usr/stonavm/auiscsi
-    audppool: EnvFilter, env, root, LANG=, STONAVM_HOME=, LD_LIBRARY_PATH=, STONAVM_RSP_PASS=, STONAVM_ACT=, /usr/stonavm/audppool
-    aureplicationlocal: EnvFilter, env, root, LANG=, STONAVM_HOME=, LD_LIBRARY_PATH=, STONAVM_RSP_PASS=, STONAVM_ACT=, /usr/stonavm/aureplicationlocal
-    aureplicationmon: EnvFilter, env, root, LANG=, STONAVM_HOME=, LD_LIBRARY_PATH=, STONAVM_RSP_PASS=, STONAVM_ACT=, /usr/stonavm/aureplicationmon
-
-    # cinder/volume/drivers/hgst.py
-    vgc-cluster: CommandFilter, vgc-cluster, root
-
-    # cinder/volume/drivers/vzstorage.py
-    pstorage-mount: CommandFilter, pstorage-mount, root
-    pstorage: CommandFilter, pstorage, root
-    ploop: CommandFilter, ploop, root
-
-    # initiator/connector.py:
-    drv_cfg: CommandFilter, /opt/emc/scaleio/sdc/bin/drv_cfg, root, /opt/emc/scaleio/sdc/bin/drv_cfg, --query_guid
-  cinder.conf: |
-    [DEFAULT]
-    rootwrap_config = /etc/cinder/rootwrap.conf
-    api_paste_confg = /etc/cinder/api-paste.ini
-    volume_name_template = volume-%s
-    volume_group = cinder-volumes
-    verbose = True
-    auth_strategy = noauth
-    state_path = /var/lib/cinder
-    lock_path = /var/lock/cinder
-    volumes_dir = /var/lib/cinder/volumes
-    transport_url = rabbit://user:password@127.0.0.1:5672/
-    enabled_backends = lvm
-
-    [database]
-    connection = mysql+pymysql://cinder:password@127.0.0.1/cinder?charset=utf8
-
-    [lvm]
-    lvm_type = thin
-    volume_driver = cinder.volume.drivers.lvm.LVMVolumeDriver
-    volume_group = cinder-volumes
-    iscsi_protocol = iscsi
-    iscsi_helper = tgtadm
-    volume_backend_name=lvm
-  logging.conf: |
-    [loggers]
-    keys = root, cinder
-
-    [handlers]
-    keys = stderr, stdout, watchedfile, syslog, null
-
-    [formatters]
-    keys = legacycinder, default
-
-    [logger_root]
-    level = WARNING
-    handlers = null
-
-    [logger_cinder]
-    level = INFO
-    handlers = stderr
-    qualname = cinder
-
-    [logger_amqplib]
-    level = WARNING
-    handlers = stderr
-    qualname = amqplib
-
-    [logger_sqlalchemy]
-    level = WARNING
-    handlers = stderr
-    qualname = sqlalchemy
-    # "level = INFO" logs SQL queries.
-    # "level = DEBUG" logs SQL queries and results.
-    # "level = WARNING" logs neither.  (Recommended for production systems.)
-
-    [logger_boto]
-    level = WARNING
-    handlers = stderr
-    qualname = boto
-
-    [logger_suds]
-    level = INFO
-    handlers = stderr
-    qualname = suds
-
-    [logger_eventletwsgi]
-    level = WARNING
-    handlers = stderr
-    qualname = eventlet.wsgi.server
-
-    [handler_stderr]
-    class = StreamHandler
-    args = (sys.stderr,)
-    formatter = legacycinder
-
-    [handler_stdout]
-    class = StreamHandler
-    args = (sys.stdout,)
-    formatter = legacycinder
-
-    [handler_watchedfile]
-    class = handlers.WatchedFileHandler
-    args = ('cinder.log',)
-    formatter = legacycinder
-
-    [handler_syslog]
-    class = handlers.SysLogHandler
-    args = ('/dev/log', handlers.SysLogHandler.LOG_USER)
-    formatter = legacycinder
-
-    [handler_null]
-    class = cinder.log.NullHandler
-    formatter = default
-    args = ()
-
-    [formatter_legacycinder]
-    class = cinder.log.LegacyCinderFormatter
-
-    [formatter_default]
-    format = %(message)s
-  policy.json: |
-    {
-        "admin_or_owner":  "is_admin:True or (role:admin and is_admin_project:True) or  project_id:%(project_id)s",
-        "default": "rule:admin_or_owner",
-
-        "admin_api": "is_admin:True or (role:admin and is_admin_project:True)",
-
-        "volume:create": "",
-        "volume:create_from_image": "",
-        "volume:delete": "rule:admin_or_owner",
-        "volume:force_delete": "rule:admin_api",
-        "volume:get": "rule:admin_or_owner",
-        "volume:get_all": "rule:admin_or_owner",
-        "volume:get_volume_metadata": "rule:admin_or_owner",
-        "volume:create_volume_metadata": "rule:admin_or_owner",
-        "volume:delete_volume_metadata": "rule:admin_or_owner",
-        "volume:update_volume_metadata": "rule:admin_or_owner",
-        "volume:get_volume_admin_metadata": "rule:admin_api",
-        "volume:update_volume_admin_metadata": "rule:admin_api",
-        "volume:get_snapshot": "rule:admin_or_owner",
-        "volume:get_all_snapshots": "rule:admin_or_owner",
-        "volume:create_snapshot": "rule:admin_or_owner",
-        "volume:delete_snapshot": "rule:admin_or_owner",
-        "volume:update_snapshot": "rule:admin_or_owner",
-        "volume:get_snapshot_metadata": "rule:admin_or_owner",
-        "volume:delete_snapshot_metadata": "rule:admin_or_owner",
-        "volume:update_snapshot_metadata": "rule:admin_or_owner",
-        "volume:extend": "rule:admin_or_owner",
-        "volume:update_readonly_flag": "rule:admin_or_owner",
-        "volume:retype": "rule:admin_or_owner",
-        "volume:update": "rule:admin_or_owner",
-
-        "volume_extension:types_manage": "rule:admin_api",
-        "volume_extension:types_extra_specs": "rule:admin_api",
-        "volume_extension:access_types_qos_specs_id": "rule:admin_api",
-        "volume_extension:access_types_extra_specs": "rule:admin_api",
-        "volume_extension:volume_type_access": "rule:admin_or_owner",
-        "volume_extension:volume_type_access:addProjectAccess": "rule:admin_api",
-        "volume_extension:volume_type_access:removeProjectAccess": "rule:admin_api",
-        "volume_extension:volume_type_encryption": "rule:admin_api",
-        "volume_extension:volume_encryption_metadata": "rule:admin_or_owner",
-        "volume_extension:extended_snapshot_attributes": "rule:admin_or_owner",
-        "volume_extension:volume_image_metadata": "rule:admin_or_owner",
-
-        "volume_extension:quotas:show": "",
-        "volume_extension:quotas:update": "rule:admin_api",
-        "volume_extension:quotas:delete": "rule:admin_api",
-        "volume_extension:quota_classes": "rule:admin_api",
-        "volume_extension:quota_classes:validate_setup_for_nested_quota_use": "rule:admin_api",
-
-        "volume_extension:volume_admin_actions:reset_status": "rule:admin_api",
-        "volume_extension:snapshot_admin_actions:reset_status": "rule:admin_api",
-        "volume_extension:backup_admin_actions:reset_status": "rule:admin_api",
-        "volume_extension:volume_admin_actions:force_delete": "rule:admin_api",
-        "volume_extension:volume_admin_actions:force_detach": "rule:admin_api",
-        "volume_extension:snapshot_admin_actions:force_delete": "rule:admin_api",
-        "volume_extension:backup_admin_actions:force_delete": "rule:admin_api",
-        "volume_extension:volume_admin_actions:migrate_volume": "rule:admin_api",
-        "volume_extension:volume_admin_actions:migrate_volume_completion": "rule:admin_api",
-
-        "volume_extension:volume_actions:upload_public": "rule:admin_api",
-        "volume_extension:volume_actions:upload_image": "rule:admin_or_owner",
-
-        "volume_extension:volume_host_attribute": "rule:admin_api",
-        "volume_extension:volume_tenant_attribute": "rule:admin_or_owner",
-        "volume_extension:volume_mig_status_attribute": "rule:admin_api",
-        "volume_extension:hosts": "rule:admin_api",
-        "volume_extension:services:index": "rule:admin_api",
-        "volume_extension:services:update" : "rule:admin_api",
-
-        "volume_extension:volume_manage": "rule:admin_api",
-        "volume_extension:volume_unmanage": "rule:admin_api",
-        "volume_extension:list_manageable": "rule:admin_api",
-
-        "volume_extension:capabilities": "rule:admin_api",
-
-        "volume:create_transfer": "rule:admin_or_owner",
-        "volume:accept_transfer": "",
-        "volume:delete_transfer": "rule:admin_or_owner",
-        "volume:get_transfer": "rule:admin_or_owner",
-        "volume:get_all_transfers": "rule:admin_or_owner",
-
-        "volume:failover_host": "rule:admin_api",
-        "volume:freeze_host": "rule:admin_api",
-        "volume:thaw_host": "rule:admin_api",
-
-        "backup:create" : "",
-        "backup:delete": "rule:admin_or_owner",
-        "backup:get": "rule:admin_or_owner",
-        "backup:get_all": "rule:admin_or_owner",
-        "backup:restore": "rule:admin_or_owner",
-        "backup:backup-import": "rule:admin_api",
-        "backup:backup-export": "rule:admin_api",
-        "backup:update": "rule:admin_or_owner",
-        "backup:backup_project_attribute": "rule:admin_api",
-
-        "snapshot_extension:snapshot_actions:update_snapshot_status": "",
-        "snapshot_extension:snapshot_manage": "rule:admin_api",
-        "snapshot_extension:snapshot_unmanage": "rule:admin_api",
-        "snapshot_extension:list_manageable": "rule:admin_api",
-
-        "consistencygroup:create" : "group:nobody",
-        "consistencygroup:delete": "group:nobody",
-        "consistencygroup:update": "group:nobody",
-        "consistencygroup:get": "group:nobody",
-        "consistencygroup:get_all": "group:nobody",
-
-        "consistencygroup:create_cgsnapshot" : "group:nobody",
-        "consistencygroup:delete_cgsnapshot": "group:nobody",
-        "consistencygroup:get_cgsnapshot": "group:nobody",
-        "consistencygroup:get_all_cgsnapshots": "group:nobody",
-
-        "group:group_types_manage": "rule:admin_api",
-        "group:group_types_specs": "rule:admin_api",
-        "group:access_group_types_specs": "rule:admin_api",
-        "group:group_type_access": "rule:admin_or_owner",
-
-        "group:create" : "",
-        "group:delete": "rule:admin_or_owner",
-        "group:update": "rule:admin_or_owner",
-        "group:get": "rule:admin_or_owner",
-        "group:get_all": "rule:admin_or_owner",
-
-        "group:create_group_snapshot": "",
-        "group:delete_group_snapshot": "rule:admin_or_owner",
-        "group:update_group_snapshot": "rule:admin_or_owner",
-        "group:get_group_snapshot": "rule:admin_or_owner",
-        "group:get_all_group_snapshots": "rule:admin_or_owner",
-        "group:reset_group_snapshot_status":"rule:admin_api",
-        "group:reset_status":"rule:admin_api",
-
-        "scheduler_extension:scheduler_stats:get_pools" : "rule:admin_api",
-        "message:delete": "rule:admin_or_owner",
-        "message:get": "rule:admin_or_owner",
-        "message:get_all": "rule:admin_or_owner",
-
-        "clusters:get": "rule:admin_api",
-        "clusters:get_all": "rule:admin_api",
-        "clusters:update": "rule:admin_api",
-
-        "workers:cleanup": "rule:admin_api"
-    }
-
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: cinder
-  namespace: default
-spec:
-  selector:
-    app: cinder
-  ports:
-    - port: 8776
-      targetPort: 8776
-        #clusterIP: None  # Headless service for StatefulSet
-        #---
-        #apiVersion: v1
-        #kind: Service
-        #metadata:
-        #  name: cinder-service
-        #spec:
-        #  type: NodePort
-        #  selector:
-        #    app.kubernetes.io/name: cinder
-        #  ports:
-        #    - port: 8776
-        #      targetPort: 8776
-        #      nodePort: 30007
----
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: cinder
-  namespace: default
-spec:
-  serviceName: "cinder"
-  replicas: 1
-  selector:
-    matchLabels:
+  apiVersion: v1
+  kind: ConfigMap
+  metadata:
+    name: cinder-conf
+    namespace: default
+  data:
+    script.sql: |
+      CREATE DATABASE cinder;
+      GRANT ALL PRIVILEGES ON cinder.* TO 'cinder'@'localhost' \
+          IDENTIFIED BY 'password';
+      GRANT ALL PRIVILEGES ON cinder.* TO 'cinder'@'%' \
+          IDENTIFIED BY 'password';
+    api-paste.ini: |
+      #############
+      # OpenStack #
+      #############
+  
+      [composite:osapi_volume]
+      use = call:cinder.api:root_app_factory
+      /: apiversions
+      /v1: openstack_volume_api_v1
+      /v2: openstack_volume_api_v2
+      /v3: openstack_volume_api_v3
+  
+      [composite:openstack_volume_api_v1]
+      use = call:cinder.api.middleware.auth:pipeline_factory
+      noauth = cors http_proxy_to_wsgi request_id faultwrap sizelimit osprofiler noauth apiv1
+      keystone = cors http_proxy_to_wsgi request_id faultwrap sizelimit osprofiler authtoken keystonecontext apiv1
+      keystone_nolimit = cors http_proxy_to_wsgi request_id faultwrap sizelimit osprofiler authtoken keystonecontext apiv1
+  
+      [composite:openstack_volume_api_v2]
+      use = call:cinder.api.middleware.auth:pipeline_factory
+      noauth = cors http_proxy_to_wsgi request_id faultwrap sizelimit osprofiler noauth apiv2
+      keystone = cors http_proxy_to_wsgi request_id faultwrap sizelimit osprofiler authtoken keystonecontext apiv2
+      keystone_nolimit = cors http_proxy_to_wsgi request_id faultwrap sizelimit osprofiler authtoken keystonecontext apiv2
+  
+      [composite:openstack_volume_api_v3]
+      use = call:cinder.api.middleware.auth:pipeline_factory
+      noauth = cors http_proxy_to_wsgi request_id faultwrap sizelimit osprofiler noauth apiv3
+      keystone = cors http_proxy_to_wsgi request_id faultwrap sizelimit osprofiler authtoken keystonecontext apiv3
+      keystone_nolimit = cors http_proxy_to_wsgi request_id faultwrap sizelimit osprofiler authtoken keystonecontext apiv3
+  
+      [filter:request_id]
+      paste.filter_factory = oslo_middleware.request_id:RequestId.factory
+  
+      [filter:http_proxy_to_wsgi]
+      paste.filter_factory = oslo_middleware.http_proxy_to_wsgi:HTTPProxyToWSGI.factory
+  
+      [filter:cors]
+      paste.filter_factory = oslo_middleware.cors:filter_factory
+      oslo_config_project = cinder
+  
+      [filter:faultwrap]
+      paste.filter_factory = cinder.api.middleware.fault:FaultWrapper.factory
+  
+      [filter:osprofiler]
+      paste.filter_factory = osprofiler.web:WsgiMiddleware.factory
+  
+      [filter:noauth]
+      paste.filter_factory = cinder.api.middleware.auth:NoAuthMiddleware.factory
+  
+      [filter:sizelimit]
+      paste.filter_factory = oslo_middleware.sizelimit:RequestBodySizeLimiter.factory
+  
+      [app:apiv1]
+      paste.app_factory = cinder.api.v1.router:APIRouter.factory
+  
+      [app:apiv2]
+      paste.app_factory = cinder.api.v2.router:APIRouter.factory
+  
+      [app:apiv3]
+      paste.app_factory = cinder.api.v3.router:APIRouter.factory
+  
+      [pipeline:apiversions]
+      pipeline = cors http_proxy_to_wsgi faultwrap osvolumeversionapp
+  
+      [app:osvolumeversionapp]
+      paste.app_factory = cinder.api.versions:Versions.factory
+  
+      ##########
+      # Shared #
+      ##########
+  
+      [filter:keystonecontext]
+      paste.filter_factory = cinder.api.middleware.auth:CinderKeystoneContext.factory
+  
+      [filter:authtoken]
+      paste.filter_factory = keystonemiddleware.auth_token:filter_factory
+    cinder_sudoers: |
+      # This sudoers file supports rootwrap for both Kolla and LOCI Images.
+      Defaults !requiretty
+      Defaults secure_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin:/var/lib/openstack/bin:/var/lib/kolla/venv/bin"
+      cinder ALL = (root) NOPASSWD: /var/lib/kolla/venv/bin/cinder-rootwrap /etc/cinder/rootwrap.conf *, /var/lib/openstack/bin/cinder-rootwrap /etc/cinder/rootwrap.conf *
+    rootwrap: |
+      # Configuration for cinder-rootwrap
+      # This file should be owned by (and only-writeable by) the root user
+  
+      [DEFAULT]
+      # List of directories to load filter definitions from (separated by ',').
+      # These directories MUST all be only writeable by root !
+      filters_path=/etc/cinder/rootwrap.d
+  
+      # List of directories to search executables in, in case filters do not
+      # explicitely specify a full path (separated by ',')
+      # If not specified, defaults to system PATH environment variable.
+      # These directories MUST all be only writeable by root !
+      exec_dirs=/sbin,/usr/sbin,/bin,/usr/bin,/usr/local/bin,/usr/local/sbin,/var/lib/openstack/bin,/var/lib/kolla/venv/bin
+  
+      # Enable logging to syslog
+      # Default value is False
+      use_syslog=False
+  
+      # Which syslog facility to use.
+      # Valid values include auth, authpriv, syslog, local0, local1...
+      # Default value is 'syslog'
+      syslog_log_facility=syslog
+  
+      # Which messages to log.
+      # INFO means log all usage
+      # ERROR means only log unsuccessful attempts
+      syslog_log_level=ERROR
+    rootwrap_filters: |
+      # cinder-rootwrap command filters for volume nodes
+      # This file should be owned by (and only-writeable by) the root user
+  
+      [Filters]
+      # cinder/volume/iscsi.py: iscsi_helper '--op' ...
+      ietadm: CommandFilter, ietadm, root
+      tgtadm: CommandFilter, tgtadm, root
+      iscsictl: CommandFilter, iscsictl, root
+      tgt-admin: CommandFilter, tgt-admin, root
+      cinder-rtstool: CommandFilter, cinder-rtstool, root
+      scstadmin: CommandFilter, scstadmin, root
+  
+      # LVM related show commands
+      pvs: EnvFilter, env, root, LC_ALL=C, pvs
+      vgs: EnvFilter, env, root, LC_ALL=C, vgs
+      lvs: EnvFilter, env, root, LC_ALL=C, lvs
+      lvdisplay: EnvFilter, env, root, LC_ALL=C, lvdisplay
+  
+      # -LVM related show commands with suppress fd warnings
+      pvs_fdwarn: EnvFilter, env, root, LC_ALL=C, LVM_SUPPRESS_FD_WARNINGS=, pvs
+      vgs_fdwarn: EnvFilter, env, root, LC_ALL=C, LVM_SUPPRESS_FD_WARNINGS=, vgs
+      lvs_fdwarn: EnvFilter, env, root, LC_ALL=C, LVM_SUPPRESS_FD_WARNINGS=, lvs
+      lvdisplay_fdwarn: EnvFilter, env, root, LC_ALL=C, LVM_SUPPRESS_FD_WARNINGS=, lvdisplay
+  
+  
+      # -LVM related show commands conf var
+      pvs_lvmconf: EnvFilter, env, root, LVM_SYSTEM_DIR=, LC_ALL=C, pvs
+      vgs_lvmconf: EnvFilter, env, root, LVM_SYSTEM_DIR=, LC_ALL=C, vgs
+      lvs_lvmconf: EnvFilter, env, root, LVM_SYSTEM_DIR=, LC_ALL=C, lvs
+      lvdisplay_lvmconf: EnvFilter, env, root, LVM_SYSTEM_DIR=, LC_ALL=C, lvdisplay
+  
+      # -LVM conf var with suppress fd_warnings
+      pvs_lvmconf: EnvFilter, env, root, LVM_SYSTEM_DIR=, LC_ALL=C, LVM_SUPPRESS_FD_WARNINGS=, pvs
+      vgs_lvmconf: EnvFilter, env, root, LVM_SYSTEM_DIR=, LC_ALL=C, LVM_SUPPRESS_FD_WARNINGS=, vgs
+      lvs_lvmconf: EnvFilter, env, root, LVM_SYSTEM_DIR=, LC_ALL=C, LVM_SUPPRESS_FD_WARNINGS=, lvs
+      lvdisplay_lvmconf: EnvFilter, env, root, LVM_SYSTEM_DIR=, LC_ALL=C, LVM_SUPPRESS_FD_WARNINGS=, lvdisplay
+  
+      # os-brick library commands
+      # os_brick.privileged.run_as_root oslo.privsep context
+      # This line ties the superuser privs with the config files, context name,
+      # and (implicitly) the actual python code invoked.
+      privsep-rootwrap: RegExpFilter, privsep-helper, root, privsep-helper, --config-file, /etc/(?!\.\.).*, --privsep_context, os_brick.privileged.default, --privsep_sock_path, /tmp/.*
+      # The following and any cinder/brick/* entries should all be obsoleted
+      # by privsep, and may be removed once the os-brick version requirement
+      # is updated appropriately.
+      scsi_id: CommandFilter, /lib/udev/scsi_id, root
+      drbdadm: CommandFilter, drbdadm, root
+  
+      # cinder/brick/local_dev/lvm.py: 'vgcreate', vg_name, pv_list
+      vgcreate: CommandFilter, vgcreate, root
+  
+      # cinder/brick/local_dev/lvm.py: 'lvcreate', '-L', sizestr, '-n', volume_name,..
+      # cinder/brick/local_dev/lvm.py: 'lvcreate', '-L', ...
+      lvcreate: EnvFilter, env, root, LC_ALL=C, lvcreate
+      lvcreate_lvmconf: EnvFilter, env, root, LVM_SYSTEM_DIR=, LC_ALL=C, lvcreate
+      lvcreate_fdwarn: EnvFilter, env, root, LC_ALL=C, LVM_SUPPRESS_FD_WARNINGS=, lvcreate
+      lvcreate_lvmconf_fdwarn: EnvFilter, env, root, LVM_SYSTEM_DIR=, LVM_SUPPRESS_FD_WARNINGS=, LC_ALL=C, lvcreate
+  
+      # cinder/volume/driver.py: 'dd', 'if=%s' % srcstr, 'of=%s' % deststr,...
+      dd: CommandFilter, dd, root
+  
+      # cinder/volume/driver.py: 'lvremove', '-f', %s/%s % ...
+      lvremove: CommandFilter, lvremove, root
+  
+      # cinder/volume/driver.py: 'lvrename', '%(vg)s', '%(orig)s' '(new)s'...
+      lvrename: CommandFilter, lvrename, root
+  
+      # cinder/brick/local_dev/lvm.py: 'lvextend', '-L' '%(new_size)s', '%(lv_name)s' ...
+      # cinder/brick/local_dev/lvm.py: 'lvextend', '-L' '%(new_size)s', '%(thin_pool)s' ...
+      lvextend: EnvFilter, env, root, LC_ALL=C, lvextend
+      lvextend_lvmconf: EnvFilter, env, root, LVM_SYSTEM_DIR=, LC_ALL=C, lvextend
+      lvextend_fdwarn: EnvFilter, env, root, LC_ALL=C, LVM_SUPPRESS_FD_WARNINGS=, lvextend
+      lvextend_lvmconf_fdwarn: EnvFilter, env, root, LVM_SYSTEM_DIR=, LC_ALL=C, LVM_SUPPRESS_FD_WARNINGS=, lvextend
+  
+      # cinder/brick/local_dev/lvm.py: 'lvchange -a y -K <lv>'
+      lvchange: CommandFilter, lvchange, root
+  
+      # cinder/brick/local_dev/lvm.py: 'lvconvert', '--merge', snapshot_name
+      lvconvert: CommandFilter, lvconvert, root
+  
+      # cinder/volume/driver.py: 'iscsiadm', '-m', 'discovery', '-t',...
+      # cinder/volume/driver.py: 'iscsiadm', '-m', 'node', '-T', ...
+      iscsiadm: CommandFilter, iscsiadm, root
+  
+      # cinder/volume/utils.py: utils.temporary_chown(path, 0)
+      chown: CommandFilter, chown, root
+  
+      # cinder/volume/utils.py: copy_volume(..., ionice='...')
+      ionice_1: ChainingRegExpFilter, ionice, root, ionice, -c[0-3], -n[0-7]
+      ionice_2: ChainingRegExpFilter, ionice, root, ionice, -c[0-3]
+  
+      # cinder/volume/utils.py: setup_blkio_cgroup()
+      cgcreate: CommandFilter, cgcreate, root
+      cgset: CommandFilter, cgset, root
+      cgexec: ChainingRegExpFilter, cgexec, root, cgexec, -g, blkio:\S+
+  
+      # cinder/volume/driver.py
+      dmsetup: CommandFilter, dmsetup, root
+      ln: CommandFilter, ln, root
+  
+      # cinder/image/image_utils.py
+      qemu-img: EnvFilter, env, root, LC_ALL=C, qemu-img
+      qemu-img_convert: CommandFilter, qemu-img, root
+  
+      udevadm: CommandFilter, udevadm, root
+  
+      # cinder/volume/driver.py: utils.read_file_as_root()
+      cat: CommandFilter, cat, root
+  
+      # cinder/volume/nfs.py
+      stat: CommandFilter, stat, root
+      mount: CommandFilter, mount, root
+      df: CommandFilter, df, root
+      du: CommandFilter, du, root
+      truncate: CommandFilter, truncate, root
+      chmod: CommandFilter, chmod, root
+      rm: CommandFilter, rm, root
+  
+      # cinder/volume/drivers/remotefs.py
+      mkdir: CommandFilter, mkdir, root
+  
+      # cinder/volume/drivers/netapp/nfs.py:
+      netapp_nfs_find: RegExpFilter, find, root, find, ^[/]*([^/\0]+(/+)?)*$, -maxdepth, \d+, -name, img-cache.*, -amin, \+\d+
+  
+      # cinder/volume/drivers/glusterfs.py
+      chgrp: CommandFilter, chgrp, root
+      umount: CommandFilter, umount, root
+      fallocate: CommandFilter, fallocate, root
+  
+      # cinder/volumes/drivers/hds/hds.py:
+      hus-cmd: CommandFilter, hus-cmd, root
+      hus-cmd_local: CommandFilter, /usr/local/bin/hus-cmd, root
+  
+      # cinder/volumes/drivers/hds/hnas_backend.py
+      ssc: CommandFilter, ssc, root
+  
+      # cinder/brick/initiator/connector.py:
+      ls: CommandFilter, ls, root
+      tee: CommandFilter, tee, root
+      multipath: CommandFilter, multipath, root
+      multipathd: CommandFilter, multipathd, root
+      systool: CommandFilter, systool, root
+  
+      # cinder/volume/drivers/block_device.py
+      blockdev: CommandFilter, blockdev, root
+  
+      # cinder/volume/drivers/ibm/gpfs.py
+      # cinder/volume/drivers/tintri.py
+      mv: CommandFilter, mv, root
+  
+      # cinder/volume/drivers/ibm/gpfs.py
+      cp: CommandFilter, cp, root
+      mmgetstate: CommandFilter, /usr/lpp/mmfs/bin/mmgetstate, root
+      mmclone: CommandFilter, /usr/lpp/mmfs/bin/mmclone, root
+      mmlsattr: CommandFilter, /usr/lpp/mmfs/bin/mmlsattr, root
+      mmchattr: CommandFilter, /usr/lpp/mmfs/bin/mmchattr, root
+      mmlsconfig: CommandFilter, /usr/lpp/mmfs/bin/mmlsconfig, root
+      mmlsfs: CommandFilter, /usr/lpp/mmfs/bin/mmlsfs, root
+      mmlspool: CommandFilter, /usr/lpp/mmfs/bin/mmlspool, root
+      mkfs: CommandFilter, mkfs, root
+      mmcrfileset: CommandFilter, /usr/lpp/mmfs/bin/mmcrfileset, root
+      mmlinkfileset: CommandFilter, /usr/lpp/mmfs/bin/mmlinkfileset, root
+      mmunlinkfileset: CommandFilter, /usr/lpp/mmfs/bin/mmunlinkfileset, root
+      mmdelfileset: CommandFilter, /usr/lpp/mmfs/bin/mmdelfileset, root
+      mmcrsnapshot: CommandFilter, /usr/lpp/mmfs/bin/mmcrsnapshot, root
+      mmdelsnapshot: CommandFilter, /usr/lpp/mmfs/bin/mmdelsnapshot, root
+  
+      # cinder/volume/drivers/ibm/gpfs.py
+      # cinder/volume/drivers/ibm/ibmnas.py
+      find_maxdepth_inum: RegExpFilter, find, root, find, ^[/]*([^/\0]+(/+)?)*$, -maxdepth, \d+, -ignore_readdir_race, -inum, \d+, -print0, -quit
+  
+      # cinder/brick/initiator/connector.py:
+      aoe-revalidate: CommandFilter, aoe-revalidate, root
+      aoe-discover: CommandFilter, aoe-discover, root
+      aoe-flush: CommandFilter, aoe-flush, root
+  
+      # cinder/brick/initiator/linuxscsi.py:
+      sg_scan: CommandFilter, sg_scan, root
+  
+      #cinder/backup/services/tsm.py
+      dsmc:CommandFilter,/usr/bin/dsmc,root
+  
+      # cinder/volume/drivers/hitachi/hbsd_horcm.py
+      raidqry: CommandFilter, raidqry, root
+      raidcom: CommandFilter, raidcom, root
+      pairsplit: CommandFilter, pairsplit, root
+      paircreate: CommandFilter, paircreate, root
+      pairdisplay: CommandFilter, pairdisplay, root
+      pairevtwait: CommandFilter, pairevtwait, root
+      horcmstart.sh: CommandFilter, horcmstart.sh, root
+      horcmshutdown.sh: CommandFilter, horcmshutdown.sh, root
+      horcmgr: EnvFilter, env, root, HORCMINST=, /etc/horcmgr
+  
+      # cinder/volume/drivers/hitachi/hbsd_snm2.py
+      auman: EnvFilter, env, root, LANG=, STONAVM_HOME=, LD_LIBRARY_PATH=, STONAVM_RSP_PASS=, STONAVM_ACT=, /usr/stonavm/auman
+      auluref: EnvFilter, env, root, LANG=, STONAVM_HOME=, LD_LIBRARY_PATH=, STONAVM_RSP_PASS=, STONAVM_ACT=, /usr/stonavm/auluref
+      auhgdef: EnvFilter, env, root, LANG=, STONAVM_HOME=, LD_LIBRARY_PATH=, STONAVM_RSP_PASS=, STONAVM_ACT=, /usr/stonavm/auhgdef
+      aufibre1: EnvFilter, env, root, LANG=, STONAVM_HOME=, LD_LIBRARY_PATH=, STONAVM_RSP_PASS=, STONAVM_ACT=, /usr/stonavm/aufibre1
+      auhgwwn: EnvFilter, env, root, LANG=, STONAVM_HOME=, LD_LIBRARY_PATH=, STONAVM_RSP_PASS=, STONAVM_ACT=, /usr/stonavm/auhgwwn
+      auhgmap: EnvFilter, env, root, LANG=, STONAVM_HOME=, LD_LIBRARY_PATH=, STONAVM_RSP_PASS=, STONAVM_ACT=, /usr/stonavm/auhgmap
+      autargetmap: EnvFilter, env, root, LANG=, STONAVM_HOME=, LD_LIBRARY_PATH=, STONAVM_RSP_PASS=, STONAVM_ACT=, /usr/stonavm/autargetmap
+      aureplicationvvol: EnvFilter, env, root, LANG=, STONAVM_HOME=, LD_LIBRARY_PATH=, STONAVM_RSP_PASS=, STONAVM_ACT=, /usr/stonavm/aureplicationvvol
+      auluadd: EnvFilter, env, root, LANG=, STONAVM_HOME=, LD_LIBRARY_PATH=, STONAVM_RSP_PASS=, STONAVM_ACT=, /usr/stonavm/auluadd
+      auludel: EnvFilter, env, root, LANG=, STONAVM_HOME=, LD_LIBRARY_PATH=, STONAVM_RSP_PASS=, STONAVM_ACT=, /usr/stonavm/auludel
+      auluchgsize: EnvFilter, env, root, LANG=, STONAVM_HOME=, LD_LIBRARY_PATH=, STONAVM_RSP_PASS=, STONAVM_ACT=, /usr/stonavm/auluchgsize
+      auchapuser: EnvFilter, env, root, LANG=, STONAVM_HOME=, LD_LIBRARY_PATH=, STONAVM_RSP_PASS=, STONAVM_ACT=, /usr/stonavm/auchapuser
+      autargetdef: EnvFilter, env, root, LANG=, STONAVM_HOME=, LD_LIBRARY_PATH=, STONAVM_RSP_PASS=, STONAVM_ACT=, /usr/stonavm/autargetdef
+      autargetopt: EnvFilter, env, root, LANG=, STONAVM_HOME=, LD_LIBRARY_PATH=, STONAVM_RSP_PASS=, STONAVM_ACT=, /usr/stonavm/autargetopt
+      autargetini: EnvFilter, env, root, LANG=, STONAVM_HOME=, LD_LIBRARY_PATH=, STONAVM_RSP_PASS=, STONAVM_ACT=, /usr/stonavm/autargetini
+      auiscsi: EnvFilter, env, root, LANG=, STONAVM_HOME=, LD_LIBRARY_PATH=, STONAVM_RSP_PASS=, STONAVM_ACT=, /usr/stonavm/auiscsi
+      audppool: EnvFilter, env, root, LANG=, STONAVM_HOME=, LD_LIBRARY_PATH=, STONAVM_RSP_PASS=, STONAVM_ACT=, /usr/stonavm/audppool
+      aureplicationlocal: EnvFilter, env, root, LANG=, STONAVM_HOME=, LD_LIBRARY_PATH=, STONAVM_RSP_PASS=, STONAVM_ACT=, /usr/stonavm/aureplicationlocal
+      aureplicationmon: EnvFilter, env, root, LANG=, STONAVM_HOME=, LD_LIBRARY_PATH=, STONAVM_RSP_PASS=, STONAVM_ACT=, /usr/stonavm/aureplicationmon
+  
+      # cinder/volume/drivers/hgst.py
+      vgc-cluster: CommandFilter, vgc-cluster, root
+  
+      # cinder/volume/drivers/vzstorage.py
+      pstorage-mount: CommandFilter, pstorage-mount, root
+      pstorage: CommandFilter, pstorage, root
+      ploop: CommandFilter, ploop, root
+  
+      # initiator/connector.py:
+      drv_cfg: CommandFilter, /opt/emc/scaleio/sdc/bin/drv_cfg, root, /opt/emc/scaleio/sdc/bin/drv_cfg, --query_guid
+    cinder.conf: |
+      [DEFAULT]
+      rootwrap_config = /etc/cinder/rootwrap.conf
+      api_paste_confg = /etc/cinder/api-paste.ini
+      volume_name_template = volume-%s
+      volume_group = cinder-volumes
+      verbose = True
+      auth_strategy = noauth
+      state_path = /var/lib/cinder
+      lock_path = /var/lock/cinder
+      volumes_dir = /var/lib/cinder/volumes
+      transport_url = rabbit://user:password@127.0.0.1:5672/
+      enabled_backends = lvm
+      iscsi_target_prefix = iqn.2010-10.org.openstack:volume
+      iscsi_use_chap_auth = False
+      # target_prefix = iqn.2010-10.org.openstack:volume
+      # use_chap_auth = False
+  
+      [database]
+      connection = mysql+pymysql://cinder:password@127.0.0.1/cinder?charset=utf8
+  
+      [lvm]
+      lvm_type = thin
+      volume_driver = cinder.volume.drivers.lvm.LVMVolumeDriver
+      volume_group = cinder-volumes
+      iscsi_protocol = iscsi
+      iscsi_helper = tgtadm
+      volume_backend_name=lvm
+      iscsi_target_prefix = iqn.2010-10.org.openstack:volume
+      iscsi_use_chap_auth = False
+      # target_prefix = iqn.2010-10.org.openstack:volume
+      # use_chap_auth = False
+  
+      [backend_defaults]
+      iscsi_target_prefix = iqn.2010-10.org.openstack:volume
+      iscsi_use_chap_auth = False
+      # target_prefix = iqn.2010-10.org.openstack:volume
+      # use_chap_auth = False
+    logging.conf: |
+      [loggers]
+      keys = root, cinder
+  
+      [handlers]
+      keys = stderr, stdout, watchedfile, syslog, null
+  
+      [formatters]
+      keys = legacycinder, default
+  
+      [logger_root]
+      level = WARNING
+      handlers = null
+  
+      [logger_cinder]
+      level = INFO
+      handlers = stderr
+      qualname = cinder
+  
+      [logger_amqplib]
+      level = WARNING
+      handlers = stderr
+      qualname = amqplib
+  
+      [logger_sqlalchemy]
+      level = WARNING
+      handlers = stderr
+      qualname = sqlalchemy
+      # "level = INFO" logs SQL queries.
+      # "level = DEBUG" logs SQL queries and results.
+      # "level = WARNING" logs neither.  (Recommended for production systems.)
+  
+      [logger_boto]
+      level = WARNING
+      handlers = stderr
+      qualname = boto
+  
+      [logger_suds]
+      level = INFO
+      handlers = stderr
+      qualname = suds
+  
+      [logger_eventletwsgi]
+      level = WARNING
+      handlers = stderr
+      qualname = eventlet.wsgi.server
+  
+      [handler_stderr]
+      class = StreamHandler
+      args = (sys.stderr,)
+      formatter = legacycinder
+  
+      [handler_stdout]
+      class = StreamHandler
+      args = (sys.stdout,)
+      formatter = legacycinder
+  
+      [handler_watchedfile]
+      class = handlers.WatchedFileHandler
+      args = ('cinder.log',)
+      formatter = legacycinder
+  
+      [handler_syslog]
+      class = handlers.SysLogHandler
+      args = ('/dev/log', handlers.SysLogHandler.LOG_USER)
+      formatter = legacycinder
+  
+      [handler_null]
+      class = cinder.log.NullHandler
+      formatter = default
+      args = ()
+  
+      [formatter_legacycinder]
+      class = cinder.log.LegacyCinderFormatter
+  
+      [formatter_default]
+      format = %(message)s
+    policy.json: |
+      {
+          "admin_or_owner":  "is_admin:True or (role:admin and is_admin_project:True) or  project_id:%(project_id)s",
+          "default": "rule:admin_or_owner",
+  
+          "admin_api": "is_admin:True or (role:admin and is_admin_project:True)",
+  
+          "volume:create": "",
+          "volume:create_from_image": "",
+          "volume:delete": "rule:admin_or_owner",
+          "volume:force_delete": "rule:admin_api",
+          "volume:get": "rule:admin_or_owner",
+          "volume:get_all": "rule:admin_or_owner",
+          "volume:get_volume_metadata": "rule:admin_or_owner",
+          "volume:create_volume_metadata": "rule:admin_or_owner",
+          "volume:delete_volume_metadata": "rule:admin_or_owner",
+          "volume:update_volume_metadata": "rule:admin_or_owner",
+          "volume:get_volume_admin_metadata": "rule:admin_api",
+          "volume:update_volume_admin_metadata": "rule:admin_api",
+          "volume:get_snapshot": "rule:admin_or_owner",
+          "volume:get_all_snapshots": "rule:admin_or_owner",
+          "volume:create_snapshot": "rule:admin_or_owner",
+          "volume:delete_snapshot": "rule:admin_or_owner",
+          "volume:update_snapshot": "rule:admin_or_owner",
+          "volume:get_snapshot_metadata": "rule:admin_or_owner",
+          "volume:delete_snapshot_metadata": "rule:admin_or_owner",
+          "volume:update_snapshot_metadata": "rule:admin_or_owner",
+          "volume:extend": "rule:admin_or_owner",
+          "volume:update_readonly_flag": "rule:admin_or_owner",
+          "volume:retype": "rule:admin_or_owner",
+          "volume:update": "rule:admin_or_owner",
+  
+          "volume_extension:types_manage": "rule:admin_api",
+          "volume_extension:types_extra_specs": "rule:admin_api",
+          "volume_extension:access_types_qos_specs_id": "rule:admin_api",
+          "volume_extension:access_types_extra_specs": "rule:admin_api",
+          "volume_extension:volume_type_access": "rule:admin_or_owner",
+          "volume_extension:volume_type_access:addProjectAccess": "rule:admin_api",
+          "volume_extension:volume_type_access:removeProjectAccess": "rule:admin_api",
+          "volume_extension:volume_type_encryption": "rule:admin_api",
+          "volume_extension:volume_encryption_metadata": "rule:admin_or_owner",
+          "volume_extension:extended_snapshot_attributes": "rule:admin_or_owner",
+          "volume_extension:volume_image_metadata": "rule:admin_or_owner",
+  
+          "volume_extension:quotas:show": "",
+          "volume_extension:quotas:update": "rule:admin_api",
+          "volume_extension:quotas:delete": "rule:admin_api",
+          "volume_extension:quota_classes": "rule:admin_api",
+          "volume_extension:quota_classes:validate_setup_for_nested_quota_use": "rule:admin_api",
+  
+          "volume_extension:volume_admin_actions:reset_status": "rule:admin_api",
+          "volume_extension:snapshot_admin_actions:reset_status": "rule:admin_api",
+          "volume_extension:backup_admin_actions:reset_status": "rule:admin_api",
+          "volume_extension:volume_admin_actions:force_delete": "rule:admin_api",
+          "volume_extension:volume_admin_actions:force_detach": "rule:admin_api",
+          "volume_extension:snapshot_admin_actions:force_delete": "rule:admin_api",
+          "volume_extension:backup_admin_actions:force_delete": "rule:admin_api",
+          "volume_extension:volume_admin_actions:migrate_volume": "rule:admin_api",
+          "volume_extension:volume_admin_actions:migrate_volume_completion": "rule:admin_api",
+  
+          "volume_extension:volume_actions:upload_public": "rule:admin_api",
+          "volume_extension:volume_actions:upload_image": "rule:admin_or_owner",
+  
+          "volume_extension:volume_host_attribute": "rule:admin_api",
+          "volume_extension:volume_tenant_attribute": "rule:admin_or_owner",
+          "volume_extension:volume_mig_status_attribute": "rule:admin_api",
+          "volume_extension:hosts": "rule:admin_api",
+          "volume_extension:services:index": "rule:admin_api",
+          "volume_extension:services:update" : "rule:admin_api",
+  
+          "volume_extension:volume_manage": "rule:admin_api",
+          "volume_extension:volume_unmanage": "rule:admin_api",
+          "volume_extension:list_manageable": "rule:admin_api",
+  
+          "volume_extension:capabilities": "rule:admin_api",
+  
+          "volume:create_transfer": "rule:admin_or_owner",
+          "volume:accept_transfer": "",
+          "volume:delete_transfer": "rule:admin_or_owner",
+          "volume:get_transfer": "rule:admin_or_owner",
+          "volume:get_all_transfers": "rule:admin_or_owner",
+  
+          "volume:failover_host": "rule:admin_api",
+          "volume:freeze_host": "rule:admin_api",
+          "volume:thaw_host": "rule:admin_api",
+  
+          "backup:create" : "",
+          "backup:delete": "rule:admin_or_owner",
+          "backup:get": "rule:admin_or_owner",
+          "backup:get_all": "rule:admin_or_owner",
+          "backup:restore": "rule:admin_or_owner",
+          "backup:backup-import": "rule:admin_api",
+          "backup:backup-export": "rule:admin_api",
+          "backup:update": "rule:admin_or_owner",
+          "backup:backup_project_attribute": "rule:admin_api",
+  
+          "snapshot_extension:snapshot_actions:update_snapshot_status": "",
+          "snapshot_extension:snapshot_manage": "rule:admin_api",
+          "snapshot_extension:snapshot_unmanage": "rule:admin_api",
+          "snapshot_extension:list_manageable": "rule:admin_api",
+  
+          "consistencygroup:create" : "group:nobody",
+          "consistencygroup:delete": "group:nobody",
+          "consistencygroup:update": "group:nobody",
+          "consistencygroup:get": "group:nobody",
+          "consistencygroup:get_all": "group:nobody",
+  
+          "consistencygroup:create_cgsnapshot" : "group:nobody",
+          "consistencygroup:delete_cgsnapshot": "group:nobody",
+          "consistencygroup:get_cgsnapshot": "group:nobody",
+          "consistencygroup:get_all_cgsnapshots": "group:nobody",
+  
+          "group:group_types_manage": "rule:admin_api",
+          "group:group_types_specs": "rule:admin_api",
+          "group:access_group_types_specs": "rule:admin_api",
+          "group:group_type_access": "rule:admin_or_owner",
+  
+          "group:create" : "",
+          "group:delete": "rule:admin_or_owner",
+          "group:update": "rule:admin_or_owner",
+          "group:get": "rule:admin_or_owner",
+          "group:get_all": "rule:admin_or_owner",
+  
+          "group:create_group_snapshot": "",
+          "group:delete_group_snapshot": "rule:admin_or_owner",
+          "group:update_group_snapshot": "rule:admin_or_owner",
+          "group:get_group_snapshot": "rule:admin_or_owner",
+          "group:get_all_group_snapshots": "rule:admin_or_owner",
+          "group:reset_group_snapshot_status":"rule:admin_api",
+          "group:reset_status":"rule:admin_api",
+  
+          "scheduler_extension:scheduler_stats:get_pools" : "rule:admin_api",
+          "message:delete": "rule:admin_or_owner",
+          "message:get": "rule:admin_or_owner",
+          "message:get_all": "rule:admin_or_owner",
+  
+          "clusters:get": "rule:admin_api",
+          "clusters:get_all": "rule:admin_api",
+          "clusters:update": "rule:admin_api",
+  
+          "workers:cleanup": "rule:admin_api"
+      }
+  
+  ---
+  apiVersion: v1
+  kind: Service
+  metadata:
+    name: cinder
+    namespace: default
+  spec:
+    selector:
       app: cinder
-  template:
-    metadata:
-      labels:
+    ports:
+      - port: 8776
+        targetPort: 8776
+          #clusterIP: None  # Headless service for StatefulSet
+          #---
+          #apiVersion: v1
+          #kind: Service
+          #metadata:
+          #  name: cinder-service
+          #spec:
+          #  type: NodePort
+          #  selector:
+          #    app.kubernetes.io/name: cinder
+          #  ports:
+          #    - port: 8776
+          #      targetPort: 8776
+          #      nodePort: 30007
+  ---
+  apiVersion: apps/v1
+  kind: StatefulSet
+  metadata:
+    name: cinder
+    namespace: default
+  spec:
+    serviceName: "cinder"
+    replicas: 1
+    selector:
+      matchLabels:
         app: cinder
-    spec:
-      containers:
-        - name: mariadb
-          image: docker.io/library/mariadb:11.5.2
-          env:
-            - name: MYSQL_ROOT_PASSWORD
-              value: "password"
-          volumeMounts:
-            - name: config-volume
-              mountPath: /docker-entrypoint-initdb.d/script.sql
-              subPath: script.sql
-              readOnly: true
-        - name: tgtadm
-          image: digambarpat/tgtadm:v1.2
-          securityContext:
-            allowPrivilegeEscalation: true
-            privileged: true
-            runAsUser: 0
-        - name: rabbitmq
-          image: docker.io/library/rabbitmq:4.0.2
-          env:
-            - name: RABBITMQ_DEFAULT_USER
-              value: "user"
-            - name: RABBITMQ_DEFAULT_PASS
-              value: "password"
-        - name: cinder-api
-          image: docker.io/openstackhelm/cinder:2024.1-ubuntu_jammy
-          command:
-           - /bin/bash
-           - -cex
-           - |
-              python - << 'EOF'
-              import time; from sqlalchemy import create_engine; engine = create_engine('mysql+pymysql://cinder:password@127.0.0.1/cinder?charset=utf8'); start = time.time();
-              while True:
-                  try: engine.connect(); break
-                  except:
-                      if time.time() - start > 120: break
-                      time.sleep(1)
-              EOF
-              cinder-manage db sync
-              cinder-api
-          volumeMounts:
-            - name: config-volume
-              mountPath: /etc/cinder/api-paste.ini
-              subPath: api-paste.ini
-              readOnly: true
-            - name: config-volume
-              mountPath: /etc/cinder/cinder.conf
-              subPath: cinder.conf
-              readOnly: true
-            - name: config-volume
-              mountPath: /etc/cinder/logging.conf
-              subPath: logging.conf
-              readOnly: true
-            - name: config-volume
-              mountPath: /etc/cinder/policy.json
-              subPath: policy.json
-              readOnly: true
-            - name: config-volume
-              mountPath: /etc/cinder/rootwrap.conf
-              subPath: rootwrap.conf
-              readOnly: true
-        - name: cinder-scheduler
-          image: docker.io/openstackhelm/cinder:2024.1-ubuntu_jammy
-          command:
-           - /bin/bash
-           - -cex
-           - |
-              START=$(date +%s); TIMEOUT=120
-              while true; do output=$(cinder-manage --nodebug --log-file /dev/null db version 2>/dev/null || true); [ "$output" = "9c74c1c6971f" ] && break; [ $(( $(date +%s) - START )) -ge $TIMEOUT ] && break; sleep 1; done
-              cinder-scheduler
-          volumeMounts:
-            - name: config-volume
-              mountPath: /etc/cinder/api-paste.ini
-              subPath: api-paste.ini
-              readOnly: true
-            - name: config-volume
-              mountPath: /etc/cinder/cinder.conf
-              subPath: cinder.conf
-              readOnly: true
-            - name: config-volume
-              mountPath: /etc/cinder/logging.conf
-              subPath: logging.conf
-              readOnly: true
-            - name: config-volume
-              mountPath: /etc/cinder/policy.json
-              subPath: policy.json
-              readOnly: true
-            - name: config-volume
-              mountPath: /etc/cinder/rootwrap.conf
-              subPath: rootwrap.conf
-              readOnly: true
-        - name: cinder-volume
-          image: docker.io/openstackhelm/cinder:2024.1-ubuntu_jammy
-          command:
-           - /bin/bash
-           - -cex
-           - |
-              START=$(date +%s); TIMEOUT=120
-              while true; do output=$(cinder-manage --nodebug --log-file /dev/null db version 2>/dev/null || true); [ "$output" = "9c74c1c6971f" ] && break; [ $(( $(date +%s) - START )) -ge $TIMEOUT ] && break; sleep 1; done
-              # /script/my-script.sh
-              cinder-volume
-          securityContext:
-            allowPrivilegeEscalation: true
-            privileged: true
-            runAsUser: 0
-          volumeMounts:
-            - name: config-volume
-              mountPath: /etc/cinder/api-paste.ini
-              subPath: api-paste.ini
-              readOnly: true
-            - name: config-volume
-              mountPath: /etc/cinder/cinder.conf
-              subPath: cinder.conf
-              readOnly: true
-            - name: config-volume
-              mountPath: /etc/cinder/logging.conf
-              subPath: logging.conf
-              readOnly: true
-            - name: config-volume
-              mountPath: /etc/cinder/policy.json
-              subPath: policy.json
-              readOnly: true
-            - name: config-volume
-              mountPath: /etc/cinder/rootwrap.conf
-              subPath: rootwrap
-              readOnly: true
-            - name: config-volume
-              mountPath: /etc/sudoers.d/cinder
-              subPath: cinder_sudoers
-              readOnly: true
-            - name: config-volume
-              mountPath: /etc/cinder/rootwrap.d/volume.filters
-              subPath: rootwrap_filters
-              readOnly: true
-            - name: host-dev
-              mountPath: /dev
-              readOnly: false
-              mountPropagation: HostToContainer
-                #     - name: python3-cinder-install
-                #       mountPath: /script
-      volumes:
-        - name: config-volume
-          configMap:
-            name: cinder-conf
-        - name: host-dev
-          hostPath:
-            path: /dev
-              #- name: python3-cinder-install
-              #  configMap:
-              #    name: python3-cinder-install-cm
-              #    defaultMode: 0744
+    template:
+      metadata:
+        labels:
+          app: cinder
+      spec:
+        containers:
+          - name: mariadb
+            image: docker.io/library/mariadb:11.5.2
+            env:
+              - name: MYSQL_ROOT_PASSWORD
+                value: "password"
+            volumeMounts:
+              - name: config-volume
+                mountPath: /docker-entrypoint-initdb.d/script.sql
+                subPath: script.sql
+                readOnly: true
+          - name: tgtadm
+            image: digambarpat/tgtadm:v1.2
+            securityContext:
+              allowPrivilegeEscalation: true
+              privileged: true
+              runAsUser: 0
+          - name: rabbitmq
+            image: docker.io/library/rabbitmq:4.0.2
+            env:
+              - name: RABBITMQ_DEFAULT_USER
+                value: "user"
+              - name: RABBITMQ_DEFAULT_PASS
+                value: "password"
+          - name: cinder-api
+            image: docker.io/openstackhelm/cinder:2024.1-ubuntu_jammy
+            command:
+             - /bin/bash
+             - -cex
+             - |
+                python - << 'EOF'
+                import time; from sqlalchemy import create_engine; engine = create_engine('mysql+pymysql://cinder:password@127.0.0.1/cinder?charset=utf8'); start = time.time();
+                while True:
+                    try: engine.connect(); break
+                    except:
+                        if time.time() - start > 120: break
+                        time.sleep(1)
+                EOF
+                cinder-manage db sync
+                cinder-api
+            volumeMounts:
+              - name: config-volume
+                mountPath: /etc/cinder/api-paste.ini
+                subPath: api-paste.ini
+                readOnly: true
+              - name: config-volume
+                mountPath: /etc/cinder/cinder.conf
+                subPath: cinder.conf
+                readOnly: true
+              - name: config-volume
+                mountPath: /etc/cinder/logging.conf
+                subPath: logging.conf
+                readOnly: true
+              - name: config-volume
+                mountPath: /etc/cinder/policy.json
+                subPath: policy.json
+                readOnly: true
+              - name: config-volume
+                mountPath: /etc/cinder/rootwrap.conf
+                subPath: rootwrap.conf
+                readOnly: true
+          - name: cinder-scheduler
+            image: docker.io/openstackhelm/cinder:2024.1-ubuntu_jammy
+            command:
+             - /bin/bash
+             - -cex
+             - |
+                START=$(date +%s); TIMEOUT=120
+                while true; do output=$(cinder-manage --nodebug --log-file /dev/null db version 2>/dev/null || true); [ "$output" = "9c74c1c6971f" ] && break; [ $(( $(date +%s) - START )) -ge $TIMEOUT ] && break; sleep 1; done
+                cinder-scheduler
+            volumeMounts:
+              - name: config-volume
+                mountPath: /etc/cinder/api-paste.ini
+                subPath: api-paste.ini
+                readOnly: true
+              - name: config-volume
+                mountPath: /etc/cinder/cinder.conf
+                subPath: cinder.conf
+                readOnly: true
+              - name: config-volume
+                mountPath: /etc/cinder/logging.conf
+                subPath: logging.conf
+                readOnly: true
+              - name: config-volume
+                mountPath: /etc/cinder/policy.json
+                subPath: policy.json
+                readOnly: true
+              - name: config-volume
+                mountPath: /etc/cinder/rootwrap.conf
+                subPath: rootwrap.conf
+                readOnly: true
+          - name: cinder-volume
+            image: docker.io/openstackhelm/cinder:2024.1-ubuntu_jammy
+            command:
+             - /bin/bash
+             - -cex
+             - |
+                START=$(date +%s); TIMEOUT=120
+                while true; do output=$(cinder-manage --nodebug --log-file /dev/null db version 2>/dev/null || true); [ "$output" = "9c74c1c6971f" ] && break; [ $(( $(date +%s) - START )) -ge $TIMEOUT ] && break; sleep 1; done
+                # /script/my-script.sh
+                cinder-volume
+            securityContext:
+              allowPrivilegeEscalation: true
+              privileged: true
+              runAsUser: 0
+            volumeMounts:
+              - name: config-volume
+                mountPath: /etc/cinder/api-paste.ini
+                subPath: api-paste.ini
+                readOnly: true
+              - name: config-volume
+                mountPath: /etc/cinder/cinder.conf
+                subPath: cinder.conf
+                readOnly: true
+              - name: config-volume
+                mountPath: /etc/cinder/logging.conf
+                subPath: logging.conf
+                readOnly: true
+              - name: config-volume
+                mountPath: /etc/cinder/policy.json
+                subPath: policy.json
+                readOnly: true
+              - name: config-volume
+                mountPath: /etc/cinder/rootwrap.conf
+                subPath: rootwrap
+                readOnly: true
+              - name: config-volume
+                mountPath: /etc/sudoers.d/cinder
+                subPath: cinder_sudoers
+                readOnly: true
+              - name: config-volume
+                mountPath: /etc/cinder/rootwrap.d/volume.filters
+                subPath: rootwrap_filters
+                readOnly: true
+              - name: host-dev
+                mountPath: /dev
+                readOnly: false
+                mountPropagation: HostToContainer
+        volumes:
+          - name: config-volume
+            configMap:
+              name: cinder-conf
+          - name: host-dev
+            hostPath:
+              path: /dev
