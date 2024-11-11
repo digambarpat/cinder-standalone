@@ -77,6 +77,5 @@ func main() {
 	var inConn volumes.InitializeConnectionOptsBuilder = connectOpts
 	inConn.ToVolumeInitializeConnectionMap()
 	connectionInfo := volumes.InitializeConnection(context.TODO(), client, volume.ID, inConn)
-
-	fmt.Printf("%+v\n", connectionInfo)
+	fmt.Printf("%+v\n", connectionInfo.PrettyPrintJSON())
 }
