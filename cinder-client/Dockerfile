@@ -9,12 +9,9 @@ WORKDIR "/python-cinderclient"
 RUN pip install -e .
 RUN pip install python-brick-cinderclient-ext  
 
-WORKDIR .
-COPY requirements.txt .
- 
-RUN pip install -r requirements.txt
- 
+WORKDIR . 
 COPY . .
+RUN pip install -r requirements.txt
  
 EXPOSE 5000
  
